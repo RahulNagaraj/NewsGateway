@@ -1,10 +1,5 @@
 package com.example.newsgateway;
 
-import androidx.annotation.NonNull;
-import androidx.appcompat.app.ActionBarDrawerToggle;
-import androidx.appcompat.app.AppCompatActivity;
-import androidx.drawerlayout.widget.DrawerLayout;
-
 import android.content.res.Configuration;
 import android.os.Bundle;
 import android.util.Log;
@@ -14,19 +9,35 @@ import android.view.SubMenu;
 import android.widget.ArrayAdapter;
 import android.widget.ListView;
 
+import androidx.annotation.NonNull;
+import androidx.appcompat.app.ActionBarDrawerToggle;
+import androidx.appcompat.app.AppCompatActivity;
+import androidx.drawerlayout.widget.DrawerLayout;
+
+import com.example.newsgateway.utility.Utility;
+
+import org.json.JSONArray;
+import org.json.JSONException;
+import org.json.JSONObject;
+
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Objects;
+import java.util.stream.Collectors;
 
 public class MainActivity extends AppCompatActivity {
     private static final String TAG = "MainActivity";
-    
+
     private final HashMap<String, ArrayList<Source>> topicsToSource = new HashMap<>();
     private final HashMap<String, ArrayList<Source>> languagesToSource = new HashMap<>();
     private final HashMap<String, ArrayList<Source>> countriesToSource = new HashMap<>();
+    private final ArrayList<String> sourcesDisplayed = new ArrayList<>();
+    private String selectedTopic = null;
+    private String selectedLanguage = null;
+    private String selectedCountry = null;
 
     private Menu opt_menu;
     private DrawerLayout mDrawerLayout;
@@ -78,18 +89,66 @@ public class MainActivity extends AppCompatActivity {
     public boolean onOptionsItemSelected(@NonNull MenuItem item) {
 
         if (mDrawerToggle.onOptionsItemSelected(item)) {
-            Log.d(TAG, "onOptionsItemSelected: mDrawerToggle " + item);
+            Log.d(TAG, "onOptionsItemSelected: mDrawerToggle " + item.getTitle());
             return true;
         }
 
-        Log.d(TAG, "onOptionsItemSelected: " + item);
+        SubMenu subMenu = item.getSubMenu();
 
-//        List<String> lst = regionToSubRegion.get(item.getTitle().toString());
-//        if (lst != null) {
-//            subRegionDisplayed.addAll(lst);
-//        }
-//
-//        arrayAdapter.notifyDataSetChanged();
+        if (subMenu == null) {
+            int id = item.getItemId();
+            if (id == 0) {
+                selectedTopic = item.getTitle().toString();
+                ArrayList<Source> topics = topicsToSource.get(selectedTopic);
+                setTitle(String.format("%s (%s)", getString(R.string.app_name), topics.size()));
+                sourcesDisplayed.clear();
+                arrayAdapter.notifyDataSetChanged();
+                for (Source source : topics) {
+                    sourcesDisplayed.add(source.getName());
+                }
+            }
+            else if (id == 1) {
+                selectedLanguage = item.getTitle().toString();
+                ArrayList<Source> languages = languagesToSource.get(selectedLanguage);
+                sourcesDisplayed.clear();
+                arrayAdapter.notifyDataSetChanged();
+//                String topic = selectedTopic.equalsIgnoreCase("all") ? "All" : selectedTopic;
+
+                List<Source> filteredLanguages;
+                if (selectedTopic != null) {
+                    filteredLanguages = languages.stream()
+                            .filter(source1 -> source1.getCategory().equalsIgnoreCase(selectedTopic))
+                            .collect(Collectors.toList());
+                } else {
+                    filteredLanguages = new ArrayList<>(languages);
+                }
+                setTitle(String.format("%s (%s)", getString(R.string.app_name), filteredLanguages.size()));
+                for (Source source : filteredLanguages) {
+                    sourcesDisplayed.add(source.getName());
+                }
+            }
+            else if (id == 2) {
+                selectedCountry = item.getTitle().toString();
+                ArrayList<Source> countries = countriesToSource.get(selectedCountry);
+                sourcesDisplayed.clear();
+                arrayAdapter.notifyDataSetChanged();
+
+                List<Source> filteredCountries;
+                if (selectedLanguage != null && !selectedLanguage.equalsIgnoreCase("All")) {
+                    filteredCountries = countries.stream()
+                            .filter(source1 -> source1.getLanguage().equalsIgnoreCase(selectedLanguage))
+                            .collect(Collectors.toList());
+                } else {
+                    filteredCountries = new ArrayList<>(countries);
+                }
+                setTitle(String.format("%s (%s)", getString(R.string.app_name), filteredCountries.size()));
+                for (Source source : filteredCountries) {
+                    sourcesDisplayed.add(source.getName());
+                }
+            }
+        }
+
+        arrayAdapter.notifyDataSetChanged();
         return super.onOptionsItemSelected(item);
     }
 
@@ -100,6 +159,10 @@ public class MainActivity extends AppCompatActivity {
     }
 
     public void updateData(List<Source> sourcesList) {
+        topicsToSource.put("all", new ArrayList<>(sourcesList));
+        languagesToSource.put("All", new ArrayList<>(sourcesList));
+        countriesToSource.put("All", new ArrayList<>(sourcesList));
+
         for (Source source : sourcesList) {
             String topic = source.getCategory();
             String language = source.getLanguage();
@@ -109,39 +172,75 @@ public class MainActivity extends AppCompatActivity {
                 topicsToSource.put(topic, new ArrayList<>());
             Objects.requireNonNull(topicsToSource.get(topic)).add(source);
 
-            if (!languagesToSource.containsKey(language))
-                languagesToSource.put(language, new ArrayList<>());
-            Objects.requireNonNull(languagesToSource.get(language)).add(source);
 
-            if (!countriesToSource.containsKey(country))
-                countriesToSource.put(country, new ArrayList<>());
-            Objects.requireNonNull(countriesToSource.get(country)).add(source);
+            String jObject = Utility.convertJsonToString(getResources(), R.raw.language_codes);
+
+            try {
+                JSONObject jsonObject  = new JSONObject(jObject);
+                JSONArray jsonArray = jsonObject.getJSONArray("languages");
+                for (int i = 0; i < jsonArray.length(); i++) {
+                    JSONObject jObj = jsonArray.getJSONObject(i);
+                    if (jObj.getString("code").toLowerCase(Locale.ROOT).equalsIgnoreCase(language)) {
+                        if (!languagesToSource.containsKey(jObj.getString("name"))) {
+                            languagesToSource.put(jObj.getString("name"), new ArrayList<>());
+                        }
+                        Objects.requireNonNull(languagesToSource.get(jObj.getString("name"))).add(source);
+                    }
+                }
+            } catch (JSONException e) {
+                e.printStackTrace();
+            }
+
+            String jObjectCountries = Utility.convertJsonToString(getResources(), R.raw.country_codes);
+
+            try {
+                JSONObject jsonObject  = new JSONObject(jObjectCountries);
+                JSONArray jsonArray = jsonObject.getJSONArray("countries");
+                for (int i = 0; i < jsonArray.length(); i++) {
+                    JSONObject jObj = jsonArray.getJSONObject(i);
+                    if (jObj.getString("code").toLowerCase(Locale.ROOT).equalsIgnoreCase(country)) {
+                        if (!countriesToSource.containsKey(jObj.getString("name"))) {
+                            countriesToSource.put(jObj.getString("name"), new ArrayList<>());
+                        }
+                        Objects.requireNonNull(countriesToSource.get(jObj.getString("name"))).add(source);
+                    }
+                }
+            } catch (JSONException e) {
+                e.printStackTrace();
+            }
         }
 
         ArrayList<String> topicsList = new ArrayList<>(topicsToSource.keySet());
+        Collections.sort(topicsList);
         ArrayList<String> languagesList = new ArrayList<>(languagesToSource.keySet());
+        Collections.sort(languagesList);
         ArrayList<String> countriesList = new ArrayList<>(countriesToSource.keySet());
+        Collections.sort(countriesList);
 
-        SubMenu topicsSubMenu = opt_menu.addSubMenu(0,1,0,"Topics");
+        SubMenu topicsSubMenu = opt_menu.addSubMenu(0,0,0,"Topics");
         SubMenu languagesSubMenu = opt_menu.addSubMenu(0,1,0,"Languages");
-        SubMenu countriesSubMenu = opt_menu.addSubMenu(0,1,0,"Countries");
-        for (String s : topicsList) {
-            topicsSubMenu.add(s);
+        SubMenu countriesSubMenu = opt_menu.addSubMenu(0,2,0,"Countries");
+
+        for (int i = 0; i < topicsList.size(); i++) {
+            topicsSubMenu.add(Menu.NONE, 0, i, topicsList.get(i));
         }
 
-        for (String s : languagesList) {
-            languagesSubMenu.add(s);
+        for (int i = 0; i < languagesList.size(); i++) {
+            languagesSubMenu.add(Menu.NONE, 1, i, languagesList.get(i));
         }
 
-        for (String s : countriesList) {
-            countriesSubMenu.add(s);
+        for (int i = 0; i < countriesList.size(); i++) {
+            countriesSubMenu.add(Menu.NONE, 2, i, countriesList.get(i));
         }
 
-//        Log.d(TAG, "updateData: " + opt_menu);
+        ArrayList<Source> sources = topicsToSource.get("all");
+        for (Source source : sources) {
+            sourcesDisplayed.add(source.getName());
+        }
 
 
-//        arrayAdapter = new ArrayAdapter<>(this, R.layout.drawer_item, subRegionDisplayed);
-//        mDrawerList.setAdapter(arrayAdapter);
+        arrayAdapter = new ArrayAdapter<>(this, R.layout.drawer_item, sourcesDisplayed);
+        mDrawerList.setAdapter(arrayAdapter);
 
         if (getSupportActionBar() != null) {
             getSupportActionBar().setDisplayHomeAsUpEnabled(true);
@@ -150,7 +249,7 @@ public class MainActivity extends AppCompatActivity {
     }
 
     public void downloadFailed() {
-//        hourlyList.clear();
-//        adapter.notifyItemRangeChanged(0, hourlyList.size());
+        sourcesDisplayed.clear();
+        arrayAdapter.notifyDataSetChanged();
     }
 }
